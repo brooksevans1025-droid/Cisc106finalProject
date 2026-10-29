@@ -1,1 +1,33 @@
 # Final Project for CISC 106
+
+#  Project Title
+
+A brief, punchy one-liner explaining what this project does.
+
+## Table of Contents
+- [Description](#description)
+- [Installation](#installation)
+- [Usage](#usage)
+- [License](#license)
+
+##  Description
+Provide a slightly deeper dive into your project here. Talk about the core problems it solves and the tech stack you used.
+
+##  Installation
+Clone the repository and install the dependencies:
+
+```bash
+git clone https://github.com
+cd project-name
+npm install # or pip install -r requirements.txt, bundle install, etc.
+```
+
+##  Usage
+Give a minimal example showing how someone can quickly run or interact with your code:
+
+```bash
+npm start # or python main.py
+```
+
+##  License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
