@@ -11,9 +11,18 @@ response = requests.get(url)
 #makes a GET request to the specified URL and stores the response in the variable 'response'.
 
 
-print("Status Code:", response.status_code)
-#prints the HTTP status code of the response to check if the request was successful (200 OK)
-
-print(response.text)
-#prints the HTML content of the webpages
+if response.status_code == 200:
+    #this is to check if the request was successful (status code 200 means OK).
+    print("Request was successful!")
+    print(response.text)
+    #this prints the raw HTML content of the response to the console.
+    soup = BeautifulSoup(response.text, 'html.parser')
+    #this creates a BeautifulSoup object from the response text, allowing for easy parsing of the HTML content.
+    if soup.title is not None:
+        print(soup.title.text)
+        #this is because .text cant be called on NoneType.
+    #this prints the title of the webpage to the console, which is extracted from the <title> tag in the HTML.
+else:
+    print("Failed to retrieve data. Status code:", response.status_code)
+    
 
