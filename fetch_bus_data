@@ -1,0 +1,19 @@
+import requests
+#installed for making HTTP requests to fetch bus data from an API.
+
+from bs4 import BeautifulSoup
+#installed for parsing HTML and XML documents, useful for extracting data from web pages.
+
+url = "https://udbusmobile.etaspot.net/index.php?content=route"
+#this is the URL of the webpage that has UD bus route information as plain txt.
+
+response = requests.get(url)
+#makes a GET request to the specified URL and stores the response in the variable 'response'.
+
+
+print("Status Code:", response.status_code)
+#prints the HTTP status code of the response to check if the request was successful (200 OK)
+
+print(response.text)
+#prints the HTML content of the webpages
+
