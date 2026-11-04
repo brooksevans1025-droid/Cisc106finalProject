@@ -37,11 +37,10 @@ def get_links (url : str) -> list[str]:
 
     else:
         temp.append("Failed to retrieve data." "Status code:" + page.status_code)
-        temp.append()
+        #returns error code
         return (temp)
 
-print(get_links("https://udbusmobile.etaspot.net/index.php?text=1"))    
-
+#Because it returns a list, the user will click a button that corrasaonders to an element in the list, and then the button will call get_links again
 
     
  
