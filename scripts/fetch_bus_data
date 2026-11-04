@@ -3,41 +3,45 @@ import requests
 from dataclasses import dataclass
 from bs4 import BeautifulSoup
 #installed for parsing HTML and XML documents, useful for extracting data from web pages.
+from urllib.parse import urljoin
+#this allows it to join the realtive link for the next page to the absoulte inputted URL
 
 
-
-
-
-
-url = "https://udbusmobile.etaspot.net/index.php?text=1"
+# "https://udbusmobile.etaspot.net/index.php?text=1"
 #this is the URL of the webpage that has UD bus route information as plain txt.
 
-page = requests.get(url)
-#makes a GET request to the specified URL and stores the response in the variable 'page'.
-
-
-if page.status_code == 200:
+def get_links (url : str) -> list[str]:
+    '''
+    get_links takes in a a link and returns the other links on that webpage as a list
+    
+    args:
+        url : a string, MUST be a vaild URL
+    
+    return:
+        Returns a list of all of the absoulte urls that occur in the HTML 
+    '''
+    page = requests.get(url)
+    #makes a GET request to the specified URL and stores the response
+    temp = []
+    if page.status_code == 200:
     #this is to check if the request was successful (status code 200 means OK).
-    print("Request was successful!")
-    #this prints the raw HTML content of the response to the console.
-    soup = BeautifulSoup(page.text, 'html.parser')
-    print (soup.type)
+        soup = BeautifulSoup(page.text, 'html.parser')
     #this creates a BeautifulSoup object from the response text, allowing for easy parsing of the HTML content.
-    if soup is not None:
-        for link in soup.find_all('a'):
-            print(link.get('href'))
-        #documentation for the loop above: https://beautiful-soup-4.readthedocs.io/en/latest/
-        #this finds all the links in the page
+        if soup:
+            
+            for link in soup.find_all('a'):
+                temp.append(urljoin(url,link.get('href')))
+            return (temp)
+            #documentation for the loop above: https://beautiful-soup-4.readthedocs.io/en/latest/
+            #this finds all the links in the page
 
-    #this prints the title of the webpage to the console, which is extracted from the <title> tag in the HTML.
-    print(soup.title.text)
+    else:
+        temp.append("Failed to retrieve data." "Status code:" + page.status_code)
+        temp.append()
+        return (temp)
+
+print(get_links("https://udbusmobile.etaspot.net/index.php?text=1"))    
+
+
     
-else:
-    print("Failed to retrieve data. Status code:", page.status_code)
-
-
-
-
-
-def soupify (url : str) -> bs4.Beatiful.Soup:
-    
+ 
