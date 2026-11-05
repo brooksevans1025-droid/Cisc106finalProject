@@ -29,7 +29,8 @@ def get_links (url : str) -> list[str]:
     #this creates a BeautifulSoup object from the response text, allowing for easy parsing of the HTML content.
         if soup:
             for link in soup.find_all('a'):
-                temp.append(urljoin(url,link.get('href')))
+                temp.append(urljoin(url,link.get('href'))) # type: ignore
+                #supressed the warnging as it caused no errors in use 
 
             if not temp:
                 temp.append("No links to be found")
@@ -38,9 +39,6 @@ def get_links (url : str) -> list[str]:
                 return (temp)
             #documentation for the loop above: https://beautiful-soup-4.readthedocs.io/en/latest/
             #this finds all the links in the page
-        
-            
-
         else:
             temp.append("Failed to pharse HTML")
             return (temp)
@@ -52,4 +50,4 @@ def get_links (url : str) -> list[str]:
 #Because it returns a list, the user will click a button that corrasaonders to an element in the list, and then the button will call get_links again
 
     
- 
+print(get_links("https://udbusmobile.etaspot.net/index.php?text=1"))
