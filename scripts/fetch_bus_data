@@ -28,15 +28,24 @@ def get_links (url : str) -> list[str]:
         soup = BeautifulSoup(page.text, 'html.parser')
     #this creates a BeautifulSoup object from the response text, allowing for easy parsing of the HTML content.
         if soup:
-            
             for link in soup.find_all('a'):
                 temp.append(urljoin(url,link.get('href')))
-            return (temp)
+
+            if not temp:
+                temp.append("No links to be found")
+                return (temp)
+            else:
+                return (temp)
             #documentation for the loop above: https://beautiful-soup-4.readthedocs.io/en/latest/
             #this finds all the links in the page
+        
+            
 
+        else:
+            temp.append("Failed to pharse HTML")
+            return (temp)
     else:
-        temp.append("Failed to retrieve data." "Status code:" + page.status_code)
+        temp.append("Failed to retrieve data." "Status code:" + str(page.status_code))
         #returns error code
         return (temp)
 
