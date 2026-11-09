@@ -2,7 +2,7 @@ import requests
 #installed for making HTTP requests to fetch bus data
 from dataclasses import dataclass
 from bs4 import BeautifulSoup
-#installed for parsing HTML and XML documents, useful for extracting data from web pages.
+#installed for parsing HTML.
 from urllib.parse import urljoin
 #this allows it to join the realtive link for the next page to the absoulte inputted URL
 
