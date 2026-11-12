@@ -1,39 +1,63 @@
 # Final Project for CISC 106
 
-#  Project Title
+# UD Bus Tracker
 
-A brief, punchy one-liner explaining what this project does.
+Live University of Delaware bus wait times, and a planner that tells you
+whether to walk or take the bus.
 
 ## Table of Contents
 - [Description](#description)
 - [Installation](#installation)
 - [Usage](#usage)
-- [License](#license)
+- [Pages](#pages)
+- [Data](#data)
 
-##  Description
-The goal of this project to to determine whether it is better to walk to a class/destination or to take the bus at the University of Delaware campus. \
+## Description
+The goal of this project is to determine whether it is better to walk to a
+class/destination or to take the bus at the University of Delaware campus.
+The site shows the 5 stops with the shortest and longest waits, which routes
+are not running, and plans a trip between two campus places.
 
-
-
-
-##  Installation
-Clone the repository and install the dependencies:
-
+## Installation
 ```bash
-git clone https://github.com
-cd project-name
-npm install # or pip install -r requirements.txt, bundle install, etc.
+pip install -r src/requirements.txt
 ```
+The only package needed is drafter 2.1.3; everything else is the Python
+standard library. Drafter runs the site inside the browser (Pyodide), so
+`requests` and other socket-based packages would not work there.
 
-##  Usage
-Give a minimal example showing how someone can quickly run or interact with your code:
-
+## Usage
 ```bash
-npm start # or python main.py
+cd scripts
+python main.py
 ```
+Drafter opens the site at http://localhost:8000. The 69 unit tests run every
+time the file loads; their results are shown under the page.
 
-##  License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Drafter writes errors to `scripts/drafter-debug.log` (git-ignored). With
+drafter 2.1.3 it always logs "Unhandled configuration update event" for the
+`set_site_information` fields; that is a drafter issue and harmless.
 
+## Pages
+- **Home**: data status and how many routes are running.
+- **Fastest stops / Slowest stops**: top 5 stops by wait for the next bus.
+- **Route status**: running and not-running routes.
+- **Plan a trip**: short how-to, and a map with a pin for every choice in
+  the two lists (campus places and every bus stop, with matching names).
+- **Trip result**: whether to walk or take the bus, numbered directions
+  (walk to the stop, wait, ride, get off, walk), and a map showing the bus
+  route in its color plus dashed walking lines.
+- **Refresh**: reloads live data.
 
-### MAKE requirements.txt for packages
+## Data
+Bus data comes from the public ETA SPOT JSON service used by UD's bus app
+(`https://udshuttle.etaspot.net/service.php`). The site loads it at start and
+reloads it whenever a page is opened with data older than 60 seconds, since
+arrival times count down from the moment they were loaded. Walking times use
+straight-line distance at 5 km/h, so real walks are a bit longer. Campus
+place coordinates are approximate.
+
+Route shapes come from the same service as Google "encoded polylines".
+Walking lines on the map are straight, matching how walk times are worked
+out. The trip map uses Leaflet 1.9.4 (from unpkg) and OpenStreetMap tiles,
+so it needs an internet connection.
