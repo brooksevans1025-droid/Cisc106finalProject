@@ -11,6 +11,7 @@ whether to walk or take the bus.
 - [Usage](#usage)
 - [Pages](#pages)
 - [Data](#data)
+- [Map paths](#map-paths)
 
 ## Description
 The goal of this project is to determine whether it is better to walk to a
@@ -31,7 +32,7 @@ standard library. Drafter runs the site inside the browser (Pyodide), so
 cd scripts
 python main.py
 ```
-Drafter opens the site at http://localhost:8000. The 69 unit tests run every
+Drafter opens the site at http://localhost:8000. The 87 unit tests run every
 time the file loads; their results are shown under the page.
 
 Drafter writes errors to `scripts/drafter-debug.log` (git-ignored). With
@@ -45,8 +46,10 @@ drafter 2.1.3 it always logs "Unhandled configuration update event" for the
 - **Plan a trip**: short how-to, and a map with a pin for every choice in
   the two lists (campus places and every bus stop, with matching names).
 - **Trip result**: whether to walk or take the bus, numbered directions
-  (walk to the stop, wait, ride, get off, walk), and a map showing the bus
-  route in its color plus dashed walking lines.
+  (walk to the stop, wait, ride, get off, walk), and a map with every bus
+  stop (yellow dots), the walk straight there (black dashed), the walks to
+  and from the bus stops (purple dashed), the bus ride (solid, in the
+  route's color) and, faint, the way the bus drives into your stop.
 - **Refresh**: reloads live data.
 
 ## Data
@@ -54,10 +57,28 @@ Bus data comes from the public ETA SPOT JSON service used by UD's bus app
 (`https://udshuttle.etaspot.net/service.php`). The site loads it at start and
 reloads it whenever a page is opened with data older than 60 seconds, since
 arrival times count down from the moment they were loaded. Walking times use
-straight-line distance at 5 km/h, so real walks are a bit longer. Campus
-place coordinates are approximate.
+5 km/h along real walking paths. Campus place coordinates are approximate.
 
-Route shapes come from the same service as Google "encoded polylines".
-Walking lines on the map are straight, matching how walk times are worked
-out. The trip map uses Leaflet 1.9.4 (from unpkg) and OpenStreetMap tiles,
+## Map paths
+Map paths are precomputed once, so the site never calls a routing
+service. `scripts/build_paths.py` makes two files with the free
+OpenStreetMap router (routing.openstreetmap.de), one request per second:
+
+- `scripts/walking_paths.json`: the walking path and its length for every
+  pair of trip planner points (campus places and bus stops).
+- `scripts/bus_paths.json`: for each bus route, its color, its stops in
+  the order the bus visits them (from ETA SPOT's `get_patterns`), and the
+  driving path from each stop to the next. The bus ride on the map follows
+  these in order, so it always runs in the bus's real direction.
+
+```bash
+cd scripts
+python build_paths.py
+```
+
+Re-run it after adding a place to `PLACES` or when UD changes its stops or
+routes; it only fetches missing walking paths (the bus paths take about a
+minute). Anything missing is drawn as a straight line.
+
+The trip map uses Leaflet 1.9.4 (from unpkg) and OpenStreetMap tiles,
 so it needs an internet connection.

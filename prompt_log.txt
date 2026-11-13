@@ -793,3 +793,268 @@ While checking, I made two mistakes you should know about:
   "pip uninstall html5lib" if you like.
 
 Not checked: the trip map itself in a real browser.
+
+---------------------------------------------------------------------
+PROMPT 14
+---------------------------------------------------------------------
+show on the map where the bus stops are and how to walk from the
+locations to the bus stops, make sure its a differnt color from the
+walking path, for the paths for bus from bus stop to destation, location
+to bus stop, and walking paths, would it be possible to pre-compute them
+so all possible routes have actual paths recorded in a list instead of
+having to access an API everytime the user calls to get a path
+
+---------------------------------------------------------------------
+RESPONSE 14
+---------------------------------------------------------------------
+[While working]
+Before building anything, one correction: the app doesn't call any path
+API right now. The walking lines are straight, drawn from coordinates. So
+getting real street paths means computing them somewhere, and precomputing
+them once is the right call. It works because every possible path runs
+between two of a fixed set of 37 points: 11 campus places and 26 stops.
+That's 666 pairs. Walk-to-stop, walk-from-stop and walk-straight-there
+legs are all among them.
+
+Drafter's open() in the browser fetches files that sit next to main.py, so
+a data file will work. The walking-route server (routing.openstreetmap.de,
+free, OpenStreetMap data) works: Morris Library to Trabant is a 458 m real
+path versus about 375 m in a straight line. The full set is too big to
+paste into main.py, so it goes in a separate walking_paths.json.
+
+The plan:
+- The one-time script: scripts/build_walking_paths.py asks the
+  walking-route server for all 666 paths, one per second (about 11
+  minutes), and saves them to walking_paths.json. Running it again only
+  fetches new pairs.
+- The site: reads that file at startup and never calls a routing service.
+  Walking times also come from the real path length. Any pair missing
+  from the file falls back to a straight line.
+- The bus ride: cut from the route's road shape, which comes with the bus
+  data the site already loads, so it needs no extra data.
+
+Pylance can't tell that a list has exactly two numbers, so walking_path
+now takes two points instead of four numbers.
+
+[Final reply]
+The trip map now shows:
+- every bus stop as a yellow dot (hover for its name),
+- the walk straight there: black dashed line,
+- the walks to and from the bus stops: purple dashed lines,
+- the bus ride: solid line in the route's color, cut from the real route
+  shape between the two stops (the rest of the route is drawn faintly),
+- a legend under the map naming each color.
+All walking lines follow real streets and paths, from the precomputed
+walking_paths.json, and walking times use the real path length. 83 tests
+pass (14 new). README updated, including how to rebuild the paths.
+
+---------------------------------------------------------------------
+PROMPT 15
+---------------------------------------------------------------------
+/ponytail:ponytail full
+
+---------------------------------------------------------------------
+RESPONSE 15
+---------------------------------------------------------------------
+Ponytail is now at full level. I'll build what you ask with the smallest
+complete change, without first pushing back on whether each part is
+needed. The walking-path build is still running in the background; when
+it finishes I'll check the paths, rerun the tests with the real file, and
+add the recent requests to the prompt log.
+
+---------------------------------------------------------------------
+PROMPT 16
+---------------------------------------------------------------------
+/ponytail:ponytail-audit
+
+---------------------------------------------------------------------
+RESPONSE 16
+---------------------------------------------------------------------
+What this repo does: a CISC 106 drafter website (scripts/main.py) for live
+UD bus wait times, route status and walk-or-ride trip planning with
+precomputed walking paths, plus a one-time script that fetches those
+paths. Assumed load: one student per browser tab, plus the developer
+running the dev server and occasionally the build script.
+
+SHOULD FIX
+1. The path build makes the running site reload every few seconds
+   (scripts/build_walking_paths.py). It saves the file after every path;
+   drafter's dev server live-reloads the site on every file change in the
+   folder. During the build the open site restarted 64 times between 10:48
+   and 10:52, re-fetching bus data, rerunning all tests and adding 5 log
+   entries each time (drafter-debug.log grew to 548 KB). Fix: save every
+   25 paths and once at the end. If skipped: confusing restarts during a
+   rebuild only.
+
+Verdict: healthy. Fix 1 before the next path rebuild.
+Checked and not a problem: nearest stop by straight line was also the
+quickest walk for every place checked; no duplicate stop names; API stop
+names are escaped before reaching the page.
+Not checked: the site in a real browser; the finished path file (build
+still running then); deploying (a built site would need
+add_website_file for walking_paths.json).
+
+---------------------------------------------------------------------
+PROMPT 17
+---------------------------------------------------------------------
+The path build doesn't have to run after the json is made correct?
+
+---------------------------------------------------------------------
+RESPONSE 17
+---------------------------------------------------------------------
+Correct. The build is a one-time step. Once walking_paths.json is
+complete, the site only reads that file. It never runs the build script
+and never contacts the routing service. Run the build again only if you
+add or move a place in PLACES, or UD adds or moves a bus stop (paths to a
+new stop are straight lines until then). A rerun only fetches the missing
+pairs, so it takes seconds.
+
+---------------------------------------------------------------------
+PROMPT 18
+---------------------------------------------------------------------
+Is it still building? The webiste isn't updating
+
+---------------------------------------------------------------------
+RESPONSE 18
+---------------------------------------------------------------------
+Yes, it was still building: 400 of 666 paths were saved, with about 5
+minutes left. The website wasn't updating because it reads
+walking_paths.json only once, when the site starts, so it doesn't notice
+new paths while the build writes them. Once the build finishes: stop the
+site, start it again with python main.py, and do a full refresh with
+Ctrl+F5.
+
+[After the build finished]
+The build finished: all 666 paths are saved, none were skipped, and the
+file is 210 KB. All 83 tests still pass. Real walks run longer than
+straight lines, for example Laird Campus to Delaware Stadium is 42 min
+along real paths versus 36 min in a straight line. Restart the site and
+press Ctrl+F5 to see the paths.
+
+---------------------------------------------------------------------
+PROMPT 19
+---------------------------------------------------------------------
+So the lines arent quite right, while the walking is, the bus route shows
+the opposoiste, teh bus would actaully becoming from the other diraction
+to the george read bus stop, also check why the transpart lines are going
+over parts that are road, if needed just show how the bus gets to the stop
+instead of its whole route, make sure it comes from the right direction,
+if not fiesable stop and tell me
+
+---------------------------------------------------------------------
+RESPONSE 19
+---------------------------------------------------------------------
+[While working]
+The real data explains it: each route's shape isn't one path the bus
+drives in order. Each stop appears 5 to 11 times along it, the end is
+more than 2 km from the start, and there are straight jumps of 100 to 400
+m between points. Those jumps are the lines crossing places that aren't
+road. The shape is several of the route's trip variants glued together,
+so "follow the shape forward" could pick the wrong direction.
+
+ETA SPOT also has get_patterns: one entry per trip variant with the
+route's real stop order as a loop. For example, College Avenue runs
+Willard Hall -> Independence Hall -> George Read Hall -> Lot 6, so the
+bus reaches George Read from Independence Hall. That order is the ground
+truth for direction. The pattern shapes still have straight jumps that
+cut across buildings, so they aren't drawn.
+
+The plan: precompute a road-following driving path between each pair of
+consecutive stops in that order (OpenStreetMap router, car mode, which
+respects one-way streets), about 70 requests. The ride is drawn as the
+chain of those legs from your stop to your exit, and instead of the whole
+route the map shows only the leg into your stop, so you can see which way
+the bus comes from. The old full-route shape and the code that sliced it
+are deleted. The build script becomes build_paths.py and also saves every
+25 paths now (the audit fix).
+
+The loops first looked 40-55% too long against ETA SPOT's lengths, but
+those lengths are in miles: College Avenue is 6.07 mi = 9.77 km, and the
+built loop is 9.28 km. Every leg is 1.0-1.4 times the straight-line
+distance, which is normal for roads, so there are no detours.
+
+[Final reply]
+Fixed, and it's precomputed like the walking paths.
+- Direction: the bus ride now follows each route's official stop order
+  from ETA SPOT, as a chain of road paths from stop to stop. On College
+  Avenue the bus reaches George Read Hall from Independence Hall and
+  continues to Lot 6. A ride "backwards" correctly goes all the way around
+  the 8.9 km loop, since the bus only drives one way.
+- Lines off the road: those came from the route shape in the bus data,
+  which glues several trip variants together with straight jumps of up to
+  1 km. It's no longer used. Every bus line now follows real roads.
+- Whole route: removed. The map shows your ride in the route's color, and
+  a faint line for the stretch the bus drives into your stop. The legend
+  names the stop it comes from, e.g. "the bus driving to your stop from
+  Independence Hall".
+- build_walking_paths.py is now build_paths.py. It also writes
+  bus_paths.json (5 routes, every leg found) and saves every 25 paths, so
+  a running site isn't reloaded every second.
+- 84 tests pass; README updated.
+
+To see it: restart python main.py and press Ctrl+F5.
+
+Not checked: the map in a real browser. The driving paths come from a
+car router; where a bus uses a bus-only road, the drawn path may take the
+nearest public road instead. The stop order comes from ETA SPOT's own
+route data; if that order is wrong for George Read Hall, tell me which
+stop the bus really comes from.
+
+---------------------------------------------------------------------
+PROMPT 20
+---------------------------------------------------------------------
+Okay looks good, finally spurce up the UI just a bit, add in small text at
+the bottom, By Brooks Evans 2026
+
+---------------------------------------------------------------------
+RESPONSE 20
+---------------------------------------------------------------------
+[While working]
+Drafter has no site-wide footer, so each page needs one. Rather than
+editing every route's content list, I'll add one small site_page helper
+that adds the footer, and swap it in for Page(state, [...]).
+
+[Final reply]
+Done. Every page now ends with small grey text, "By Brooks Evans 2026",
+centered under a thin line. One helper, site_page, adds it to all 8 page
+returns, so it can't be missed on one page.
+
+UI touches, same UD blue and gold look:
+- the nav buttons sit in a white rounded card that wraps on small
+  screens,
+- a soft blue-to-white background and slightly larger page titles,
+- buttons lift a little on hover,
+- a clear gold outline on buttons, drop-downs and the checkbox when you
+  use the keyboard,
+- table rows highlight on hover, and list items have more space,
+- drop-downs are full width (up to 420 px), labels are bold, and the
+  checkbox is bigger and UD blue.
+
+86 tests pass (2 new for the footer); README updated.
+
+To see it: refresh the page (Ctrl+F5).
+
+The site's About page author (set_site_information) is still the
+placeholder you chose earlier. Say so if it should be "Brooks Evans" too.
+Not checked: the new look in a real browser.
+
+---------------------------------------------------------------------
+PROMPT 21
+---------------------------------------------------------------------
+On the home of ther website give a short, 3 senectne max desctiopno of
+what the site does, also update the about to reflect my name
+
+---------------------------------------------------------------------
+RESPONSE 21
+---------------------------------------------------------------------
+Done.
+- Home page: a three-sentence description, in place of the old one-line
+  hint: "UD Bus Tracker shows live wait times for University of Delaware
+  buses: the stops with the shortest and longest waits, and which routes
+  are running. Pick where you are and where you're going, and it finds
+  the nearest stop, when the next bus comes, and whether walking would be
+  faster. Each trip comes with step-by-step directions and a map of the
+  walking and bus paths."
+- About page: the author in set_site_information is now "Brooks Evans".
+87 tests pass (1 new for the description); README test count updated.
+Not checked: the pages in a real browser.

@@ -8,7 +8,7 @@ import json
 import math
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from drafter import *  # type: ignore
 
 API_URL = "https://udshuttle.etaspot.net/service.php?service={}&token=TESTING"
@@ -25,6 +25,19 @@ TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 # Drafter puts this file inside an HTML script tag, so the literal closing
 # tag must never appear in the source, or the browser cuts the code off.
 SCRIPT_END = "</" + "script>"
+# both made by build_paths.py
+WALKING_PATHS_FILE = "walking_paths.json"
+BUS_PATHS_FILE = "bus_paths.json"
+WALK_COLOR = "#1a1a1a"
+WALK_TO_STOP_COLOR = "#8E24AA"
+FOOTER_TEXT = "By Brooks Evans 2026"
+HOME_DESCRIPTION = (
+    "UD Bus Tracker shows live wait times for University of Delaware buses: "
+    "the stops with the shortest and longest waits, and which routes are "
+    "running. Pick where you are and where you're going, and it finds the "
+    "nearest stop, when the next bus comes, and whether walking would be "
+    "faster. Each trip comes with step-by-step directions and a map of the "
+    "walking and bus paths.")
 
 # shortcut: hand-picked approximate coordinates, swap in a campus GIS file
 # if the walking estimates need to be more precise.
@@ -60,12 +73,6 @@ class Stop:
 
 
 @dataclass
-class RouteLine:
-    color: str
-    points: list[list[float]]
-
-
-@dataclass
 class TripPlan:
     walk_only_minutes: int
     bus_total_minutes: int
@@ -88,7 +95,6 @@ class State:
     skip_request_only: bool
     status_message: str
     loaded_at: float
-    route_lines: dict[str, RouteLine] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- data
@@ -168,14 +174,26 @@ def decode_polyline(encoded: str) -> list[list[float]]:
     return points
 
 
-def build_route_lines(routes_data: list[dict]) -> dict[str, RouteLine]:
-    """Returns each route's map color and road shape, keyed by route name."""
-    lines = {}
-    for route in routes_data:
-        lines[route["name"]] = RouteLine(
-            route.get("color", UD_BLUE),
-            decode_polyline(route.get("encLine", "")))
-    return lines
+def load_paths(file_name: str) -> dict:
+    """
+    Loads one precomputed paths file made by build_paths.py.
+
+    walking_paths.json is {path key: [km, encoded path]}; bus_paths.json is
+    {route name: {"color", "stops" (loop order), "legs" ([km, encoded path]
+    from each stop to the next, or None)}}.
+
+    Not unit tested: it reads a file. Without the files, paths are drawn
+    (and walks timed) as straight lines.
+    """
+    try:
+        with open(file_name, encoding="utf-8") as file:
+            return json.load(file)
+    except Exception:  # missing file, bad JSON, or no file access at all
+        return {}
+
+
+WALKING_PATHS = load_paths(WALKING_PATHS_FILE)
+BUS_PATHS = load_paths(BUS_PATHS_FILE)
 
 
 def routes_with_arrivals(stops: list[Stop]) -> list[str]:
@@ -206,7 +224,6 @@ def load_bus_data(state: State) -> State:
     served = routes_with_arrivals(stops)
     all_routes = [route["name"] for route in routes_data]
     state.stops = stops
-    state.route_lines = build_route_lines(routes_data)
     state.running_routes = [name for name in all_routes if name in served]
     state.not_running_routes = [name for name in all_routes
                                 if name not in served]
@@ -252,16 +269,106 @@ def distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 
-def walking_minutes(lat1: float, lng1: float, lat2: float,
-                    lng2: float) -> int:
+def path_key(lat1: float, lng1: float, lat2: float,
+             lng2: float) -> tuple[str, bool]:
     """
-    Returns whole minutes to walk between two points, rounded up.
+    Returns the walking_paths.json key for two points, and whether the
+    stored path runs the other way. Must match build_walking_paths.py.
+    """
+    first = f"{lat1:.5f},{lng1:.5f}"
+    second = f"{lat2:.5f},{lng2:.5f}"
+    if first <= second:
+        return first + "|" + second, False
+    return second + "|" + first, True
 
-    shortcut: straight-line distance ignores paths and buildings, so it
-    underestimates; use a routing service if that matters.
+
+def walking_path(start: list[float], end: list[float],
+                 paths: dict[str, list] = WALKING_PATHS) -> list[list[float]]:
     """
-    km = distance_km(lat1, lng1, lat2, lng2)
+    Returns the precomputed street path from start to end ([latitude,
+    longitude] points), or a straight line if none was precomputed.
+    """
+    key, flipped = path_key(start[0], start[1], end[0], end[1])
+    if key not in paths:
+        return [start, end]
+    points = decode_polyline(paths[key][1])
+    if flipped:
+        points.reverse()
+    # the router snaps to the nearest path, so add the exact end points
+    return [start] + points + [end]
+
+
+def walking_minutes(lat1: float, lng1: float, lat2: float, lng2: float,
+                    paths: dict[str, list] = WALKING_PATHS) -> int:
+    """
+    Returns whole minutes to walk between two points, rounded up, using the
+    precomputed street path length when there is one.
+
+    shortcut: points without a precomputed path use straight-line distance,
+    which underestimates; re-run build_walking_paths.py when places or stops
+    change.
+    """
+    key, _ = path_key(lat1, lng1, lat2, lng2)
+    if key in paths:
+        km = paths[key][0]
+    else:
+        km = distance_km(lat1, lng1, lat2, lng2)
     return math.ceil(km / WALKING_KM_PER_HOUR * 60)
+
+
+def ride_legs(stop_ids: list[int], board_id: int, exit_id: int) -> list[int]:
+    """
+    Returns the indexes of the legs a bus drives from the boarding stop to
+    the exit stop, following its loop (leg i runs from stop i to the next).
+    Empty if either stop is not on the loop. A stop the loop visits twice
+    uses the visit that gives the shortest ride.
+    """
+    best: list[int] = []
+    for i, stop_id in enumerate(stop_ids):
+        if stop_id == board_id:
+            for steps in range(1, len(stop_ids) + 1):
+                if stop_ids[(i + steps) % len(stop_ids)] == exit_id:
+                    if not best or steps < len(best):
+                        best = [(i + step) % len(stop_ids)
+                                for step in range(steps)]
+                    break
+    return best
+
+
+def leg_points(route: dict, index: int,
+               stops_by_id: dict[int, Stop]) -> list[list[float]]:
+    """
+    Returns the driving path of one leg of a bus loop, or a straight line
+    between its two stops if the path is missing (empty if a stop is
+    unknown).
+    """
+    if route["legs"][index]:
+        return decode_polyline(route["legs"][index][1])
+    start = stops_by_id.get(route["stops"][index])
+    end = stops_by_id.get(route["stops"][(index + 1) % len(route["stops"])])
+    if start is None or end is None:
+        return []
+    return [[start.latitude, start.longitude], [end.latitude, end.longitude]]
+
+
+def bus_ride_paths(route: dict, board: Stop, exit_stop: Stop,
+                   stops_by_id: dict[int, Stop]) -> tuple[list, list, str]:
+    """
+    Returns the ride path from the boarding stop to the exit stop, the path
+    the bus drives into the boarding stop, and the name of the stop it
+    comes from. Without loop data the ride is a straight line.
+    """
+    legs = ride_legs(route.get("stops", []), board.stop_id, exit_stop.stop_id)
+    if not legs:
+        return ([[board.latitude, board.longitude],
+                 [exit_stop.latitude, exit_stop.longitude]], [], "")
+    ride: list[list[float]] = []
+    for index in legs:
+        ride += leg_points(route, index, stops_by_id)
+    previous = (legs[0] - 1) % len(route["stops"])
+    came_from = stops_by_id.get(route["stops"][previous])
+    return (ride, leg_points(route, previous, stops_by_id),
+            "" if came_from is None else came_from.name)
 
 
 def is_request_only(stop: Stop) -> bool:
@@ -357,7 +464,12 @@ def nav_bar() -> Div:
                Button("Slowest stops", slowest_stops),
                Button("Route status", route_status),
                Button("Plan a trip", trip_planner),
-               Button("Refresh", refresh))
+               Button("Refresh", refresh), classes="nav")
+
+
+def site_page(state: State, content: list) -> Page:
+    """Returns a page with the site's footer added at the bottom."""
+    return Page(state, content + [FooterContent(SmallText(FOOTER_TEXT))])
 
 
 def wait_table(stops: list[Stop]) -> Table | Text:
@@ -424,17 +536,23 @@ def trip_details(plan: TripPlan, destination: str) -> list:
                             + str(plan.walk_only_minutes) + " min.")]
 
 
-def trip_map_html(markers: list[list], walks: list[list[list[float]]],
-                  route_line: RouteLine | None) -> str:
-    """
-    Returns an embedded Leaflet map (an iframe) showing pins, dashed walking
-    lines and an optional bus route line, zoomed to the pins and walks.
+def map_line(points: list[list[float]], color: str, dashed: bool,
+             faint: bool = False) -> dict:
+    """Returns one line for trip_map_html; faint lines are see-through."""
+    return {"points": points, "color": color, "dashed": dashed,
+            "opacity": 0.4 if faint else 0.9}
 
-    markers are [latitude, longitude, label]; walks are lists of points.
+
+def trip_map_html(markers: list[list], stops: list[list],
+                  lines: list[dict]) -> str:
     """
-    data = {"markers": markers, "walks": walks,
-            "route": None if route_line is None else
-            {"color": route_line.color, "points": route_line.points}}
+    Returns an embedded Leaflet map (an iframe) with labeled pins, a small
+    dot for every bus stop, and lines, zoomed to the pins and lines.
+
+    markers and stops are [latitude, longitude, label]; lines come from
+    map_line.
+    """
+    data = {"markers": markers, "stops": stops, "lines": lines}
     # "<" escaped so stop names from the API can't close the <script> tag
     data_json = json.dumps(data).replace("<", "\\u003c")
     page = f"""<!doctype html><html><head><meta charset="utf-8">
@@ -446,21 +564,22 @@ var data = {data_json};
 var map = L.map("map");
 L.tileLayer("{TILE_URL}",
   {{attribution: "&copy; OpenStreetMap contributors"}}).addTo(map);
-if (data.route) {{
-  L.polyline(data.route.points,
-    {{color: data.route.color, weight: 5, opacity: 0.6}}).addTo(map);
-}}
 var focus = [];
-data.walks.forEach(function (walk) {{
-  focus.push(L.polyline(walk, {{color: "#1a1a1a", weight: 4,
-                                dashArray: "6 8"}}));
+data.lines.forEach(function (line) {{
+  focus.push(L.polyline(line.points, {{color: line.color, weight: 5,
+    opacity: line.opacity, dashArray: line.dashed ? "8 8" : null}})
+    .addTo(map));
+}});
+data.stops.forEach(function (stop) {{
+  L.circleMarker([stop[0], stop[1]], {{radius: 5, color: "{UD_BLUE}",
+    weight: 2, fillColor: "{UD_GOLD}", fillOpacity: 1}})
+    .bindTooltip(stop[2]).addTo(map);
 }});
 data.markers.forEach(function (pin) {{
-  focus.push(L.marker([pin[0], pin[1]])
+  focus.push(L.marker([pin[0], pin[1]]).addTo(map)
     .bindTooltip(pin[2], {{permanent: true, direction: "top"}}));
 }});
-var group = L.featureGroup(focus).addTo(map);
-map.fitBounds(group.getBounds(), {{padding: [40, 40]}});
+map.fitBounds(L.featureGroup(focus).getBounds(), {{padding: [40, 40]}});
 {SCRIPT_END}</body></html>"""
     return ('<iframe title="Trip map" style="width: 100%; height: 400px; '
             'border: 0; border-radius: 12px;" srcdoc="'
@@ -469,27 +588,45 @@ map.fitBounds(group.getBounds(), {{padding: [40, 40]}});
 
 def trip_map(plan: TripPlan, origin: str, destination: str,
              places: dict[str, tuple[float, float]],
-             route_lines: dict[str, RouteLine]) -> list:
+             stops: list[Stop], bus_paths: dict) -> list:
     """
-    Returns the trip map and its legend. The map draws what the verdict
-    says: the bus route and walks to and from it, or the direct walk.
+    Returns the trip map and a legend naming each color. The map shows the
+    walk straight there and, when there is a bus option, the walks to and
+    from the stops, the bus ride, and (faint) the way the bus drives into
+    the boarding stop, so its direction is clear.
     """
     start, end = list(places[origin]), list(places[destination])
     markers = [start + ["Start: " + origin], end + ["End: " + destination]]
+    stop_dots = [[stop.latitude, stop.longitude, "Bus stop: " + stop.name]
+                 for stop in stops]
+    lines = [map_line(walking_path(start, end), WALK_COLOR, True)]
+    legend = ["Black dashed line: walking the whole way."]
     board, exit_stop = plan.board_stop, plan.exit_stop
-    if board is None or exit_stop is None \
-            or plan.walk_only_minutes <= plan.bus_total_minutes:
-        return [RawHTML(trip_map_html(markers, [[start, end]], None)),
-                Text("Dashed line: walk (straight-line).")]
-    board_point = [board.latitude, board.longitude]
-    exit_point = [exit_stop.latitude, exit_stop.longitude]
-    markers += [board_point + ["Get on: " + board.name],
-                exit_point + ["Get off: " + exit_stop.name]]
-    walks = [[start, board_point], [exit_point, end]]
-    return [RawHTML(trip_map_html(markers, walks,
-                                  route_lines.get(plan.route_name))),
-            Text("Colored line: the " + plan.route_name
-                 + " bus route. Dashed lines: walks (straight-line).")]
+    if board is not None and exit_stop is not None:
+        board_point = [board.latitude, board.longitude]
+        exit_point = [exit_stop.latitude, exit_stop.longitude]
+        markers += [board_point + ["Get on: " + board.name],
+                    exit_point + ["Get off: " + exit_stop.name]]
+        lines += [map_line(walking_path(start, board_point),
+                           WALK_TO_STOP_COLOR, True),
+                  map_line(walking_path(exit_point, end),
+                           WALK_TO_STOP_COLOR, True)]
+        legend.append("Purple dashed lines: walking to and from the bus "
+                      "stops.")
+        route = bus_paths.get(plan.route_name, {})
+        color = route.get("color", UD_BLUE)
+        ride, approach, came_from = bus_ride_paths(
+            route, board, exit_stop, {stop.stop_id: stop for stop in stops})
+        lines.append(map_line(ride, color, False))
+        legend.append("Solid colored line: your ride on the "
+                      + plan.route_name + " bus.")
+        if approach:
+            lines.append(map_line(approach, color, False, faint=True))
+            legend.append("Faint colored line: the bus driving to your stop "
+                          "from " + came_from + ".")
+    legend.append("Yellow dots: bus stops. Hover over one to see its name.")
+    return [RawHTML(trip_map_html(markers, stop_dots, lines)),
+            BulletedList(legend)]
 
 
 # --------------------------------------------------------------- routes
@@ -499,14 +636,13 @@ def trip_map(plan: TripPlan, origin: str, destination: str,
 def index(state: State) -> Page:
     """Home page: data status and a summary of what is running."""
     state = refresh_if_stale(state)
-    return Page(state, [
+    return site_page(state, [
         nav_bar(),
         Header("UD Bus Tracker"),
         Text(state.status_message),
         Paragraph(str(len(state.running_routes)) + " routes running, "
                   + str(len(state.not_running_routes)) + " not running."),
-        Paragraph("See which stops have the shortest and longest waits, "
-                  "or plan a trip to find out if walking beats the bus."),
+        Paragraph(HOME_DESCRIPTION),
     ])
 
 
@@ -524,7 +660,7 @@ def refresh(state: State) -> Page:
 def fastest_stops(state: State) -> Page:
     """Shows the stops with the shortest wait for the next bus."""
     state = refresh_if_stale(state)
-    return Page(state, [
+    return site_page(state, [
         nav_bar(), Header("Top 5 fastest waits"),
         wait_table(rank_stops_by_wait(state.stops, False)),
     ])
@@ -534,7 +670,7 @@ def fastest_stops(state: State) -> Page:
 def slowest_stops(state: State) -> Page:
     """Shows the stops with the longest wait for the next bus."""
     state = refresh_if_stale(state)
-    return Page(state, [
+    return site_page(state, [
         nav_bar(), Header("Top 5 slowest waits"),
         wait_table(rank_stops_by_wait(state.stops, True)),
     ])
@@ -550,7 +686,7 @@ def route_status(state: State) -> Page:
         running = [BulletedList(state.running_routes)]
     if state.not_running_routes:
         not_running = [BulletedList(state.not_running_routes)]
-    return Page(state, [
+    return site_page(state, [
         nav_bar(), Header("Route status"), Text(state.status_message),
         Header("Running", 2), *running,
         Header("Not running", 2), *not_running,
@@ -568,7 +704,7 @@ def trip_planner(state: State) -> Page:
     origin_box = SelectBox("origin", place_names, origin)
     destination_box = SelectBox("destination", place_names, destination)
     skip_box = CheckBox("skip_request_only", state.skip_request_only)
-    return Page(state, [
+    return site_page(state, [
         nav_bar(), Header("Plan a trip"),
         NumberedList(["Find where you are and where you're going on the "
                       "map. Hover over a pin to see its name.",
@@ -591,22 +727,23 @@ def find_trip(state: State, origin: str, destination: str,
     state = refresh_if_stale(state)
     places = place_coordinates(state.stops)
     if origin not in places or destination not in places:
-        return Page(state, [nav_bar(), Header("Unknown place"),
+        return site_page(state, [nav_bar(), Header("Unknown place"),
                             Button("Back", trip_planner)])
     state.origin = origin
     state.destination = destination
     state.skip_request_only = skip_request_only
     if origin == destination:
-        return Page(state, [nav_bar(), Header("You are already there!"),
+        return site_page(state, [nav_bar(), Header("You are already there!"),
                             Button("Plan another trip", trip_planner)])
     stops = usable_stops(state.stops, skip_request_only)
     plan = plan_trip(places[origin], places[destination], stops)
-    return Page(state, [
+    return site_page(state, [
         nav_bar(), Header(origin + " to " + destination),
         Text(state.status_message),
         Header(recommendation(plan), 2),
         *trip_details(plan, destination),
-        *trip_map(plan, origin, destination, places, state.route_lines),
+        *trip_map(plan, origin, destination, places, state.stops,
+                  BUS_PATHS),
         Button("Plan another trip", trip_planner),
     ])
 
@@ -676,6 +813,29 @@ assert_equal(distance_km(39.68, -75.75, 39.68, -75.75), 0.0)
 assert_equal(distance_km(0, 0, 1, 0), 111.19, precision=2)
 assert_equal(walking_minutes(39.68, -75.75, 39.68, -75.75), 0)
 assert_equal(walking_minutes(0, 0, 0.009, 0), 13)  # about 1 km
+# a precomputed 0.5 km path wins over the straight line (about 157 km)
+assert_equal(walking_minutes(1.0, 2.0, 2.0, 3.0,
+                             {"1.00000,2.00000|2.00000,3.00000": [0.5, ""]}),
+             6)
+
+# path_key: same key both ways, flagged when the stored path is reversed
+assert_equal(path_key(1.0, 2.0, 2.0, 3.0),
+             ("1.00000,2.00000|2.00000,3.00000", False))
+assert_equal(path_key(2.0, 3.0, 1.0, 2.0),
+             ("1.00000,2.00000|2.00000,3.00000", True))
+
+# walking_path: stored path (reversed when needed), else a straight line
+assert_equal(walking_path([1.0, 2.0], [2.0, 3.0],
+                          {"1.00000,2.00000|2.00000,3.00000":
+                           [0.5, "_p~iF~ps|U_ulLnnqC"]}),
+             [[1.0, 2.0], [38.5, -120.2], [40.7, -120.95], [2.0, 3.0]])
+assert_equal(walking_path([2.0, 3.0], [1.0, 2.0],
+                          {"1.00000,2.00000|2.00000,3.00000":
+                           [0.5, "_p~iF~ps|U_ulLnnqC"]}),
+             [[2.0, 3.0], [40.7, -120.95], [38.5, -120.2], [1.0, 2.0]])
+assert_equal(walking_path([1.0, 2.0], [5.0, 6.0], {}),
+             [[1.0, 2.0], [5.0, 6.0]])
+
 
 # is_request_only and usable_stops
 assert_equal(is_request_only(REQUEST), True)
@@ -722,14 +882,6 @@ assert_equal(decode_polyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@"),
              precision=5)
 assert_equal(decode_polyline(""), [])
 
-# build_route_lines: uses the API color, falls back to UD blue
-assert_equal(build_route_lines([{"name": "College Avenue",
-                                 "color": "#1C0CF2",
-                                 "encLine": "_p~iF~ps|U"}]),
-             {"College Avenue": RouteLine("#1C0CF2", [[38.5, -120.2]])})
-assert_equal(build_route_lines([{"name": "Academy Street"}]),
-             {"Academy Street": RouteLine(UD_BLUE, [])})
-
 # place_coordinates: campus places plus every stop, by list name
 assert_equal(place_coordinates([NORTH])["Bus stop: North Stop"],
              (39.69, -75.752))
@@ -744,23 +896,63 @@ assert_equal(planner_markers([NORTH, REQUEST])[len(PLACES):],
                         "Bus stop: North Stop (next bus 3 min)"),
               MapMarker(39.68, -75.76, "Bus stop: Lot 6 - Request Only")])
 
+# A bus loop shaped like bus_paths.json: North -> Request -> South -> North.
+# Leg 0 has a stored path, legs 1 and 2 are missing (drawn straight).
+SAMPLE_LOOP = {"color": "#1C0CF2", "stops": [1, 3, 2],
+               "legs": [[0.5, "_p~iF~ps|U"], None, None]}
+SAMPLE_STOPS_BY_ID = {1: NORTH, 2: SOUTH, 3: REQUEST}
+
+# ride_legs: follows the loop order, wraps around, picks the shorter visit
+assert_equal(ride_legs([1, 3, 2], 1, 2), [0, 1])
+assert_equal(ride_legs([1, 3, 2], 2, 1), [2])
+assert_equal(ride_legs([1, 3, 2], 1, 9), [])
+assert_equal(ride_legs([5, 1, 6, 5, 2], 5, 2), [3])
+
+# leg_points: stored path, else a straight line, else nothing
+assert_equal(leg_points(SAMPLE_LOOP, 0, SAMPLE_STOPS_BY_ID),
+             [[38.5, -120.2]])
+assert_equal(leg_points(SAMPLE_LOOP, 1, SAMPLE_STOPS_BY_ID),
+             [[39.68, -75.76], [39.665, -75.75]])
+assert_equal(leg_points(SAMPLE_LOOP, 1, {1: NORTH, 2: SOUTH}), [])
+
+# bus_ride_paths: ride in loop order, the leg into the boarding stop, and
+# where the bus comes from; a straight ride without loop data
+assert_equal(bus_ride_paths(SAMPLE_LOOP, NORTH, SOUTH, SAMPLE_STOPS_BY_ID),
+             ([[38.5, -120.2], [39.68, -75.76], [39.665, -75.75]],
+              [[39.665, -75.75], [39.69, -75.752]], "South Stop"))
+assert_equal(bus_ride_paths({}, NORTH, SOUTH, SAMPLE_STOPS_BY_ID),
+             ([[39.69, -75.752], [39.665, -75.75]], [], ""))
+
+# map_line: normal lines are solid, faint ones see-through
+assert_equal(map_line([[0.0, 0.0]], WALK_COLOR, True),
+             {"points": [[0.0, 0.0]], "color": WALK_COLOR, "dashed": True,
+              "opacity": 0.9})
+assert_equal(map_line([], "#1C0CF2", False, faint=True)["opacity"], 0.4)
+
 # trip_map_html: data is embedded, and "<" can't break out of the script
-assert_equal("#1C0CF2" in trip_map_html([], [], RouteLine("#1C0CF2", [])),
-             True)
+assert_equal("#1C0CF2" in trip_map_html(
+    [], [], [map_line([], "#1C0CF2", False)]), True)
 assert_equal("\\u003c/script&gt;" in trip_map_html([[1.0, 2.0, SCRIPT_END]],
-                                                   [], None),
+                                                   [], []),
              True)
 
-# trip_map: draws the direct walk, or the bus route with walks to and from it
-assert_has(trip_map(TripPlan(5, NO_BUS, "", None, None, 0, 0, 0, 0),
-                    "ISE Lab", "Morris Library", PLACES, {}),
-           "Dashed line: walk (straight-line).")
-assert_has(trip_map(TripPlan(30, 9, "College Avenue", NORTH, SOUTH,
-                             1, 3, 5, 1),
-                    "Laird Campus", "Delaware Stadium", PLACES,
-                    {"College Avenue": RouteLine("#1C0CF2", [])}),
-           "Colored line: the College Avenue bus route. "
-           "Dashed lines: walks (straight-line).")
+# trip_map: always the direct walk; with a bus option, also the walks to
+# and from the stops (another color), the ride and the bus's approach
+assert_text(trip_map(TripPlan(5, NO_BUS, "", None, None, 0, 0, 0, 0),
+                     "ISE Lab", "Morris Library", PLACES, [], {})[1],
+            "Black dashed line: walking the whole way.\n"
+            "Yellow dots: bus stops. Hover over one to see its name.")
+assert_text(trip_map(TripPlan(30, 9, "College Avenue", NORTH, SOUTH,
+                              1, 3, 5, 1),
+                     "Laird Campus", "Delaware Stadium", PLACES,
+                     [NORTH, SOUTH, REQUEST],
+                     {"College Avenue": SAMPLE_LOOP})[1],
+            "Black dashed line: walking the whole way.\n"
+            "Purple dashed lines: walking to and from the bus stops.\n"
+            "Solid colored line: your ride on the College Avenue bus.\n"
+            "Faint colored line: the bus driving to your stop from South "
+            "Stop.\n"
+            "Yellow dots: bus stops. Hover over one to see its name.")
 
 # nav_bar
 assert_has(nav_bar(), Button("Plan a trip", trip_planner))
@@ -793,6 +985,7 @@ assert_equal(trip_details(TripPlan(10, NO_BUS, "", None, None, 0, 0, 0, 0),
 # route: index
 assert_has(index(sample_state()), "1 routes running, 1 not running.")
 assert_has(index(sample_state()), "Live data loaded.")
+assert_has(index(sample_state()), Paragraph(HOME_DESCRIPTION))
 
 # route: fastest_stops / slowest_stops
 assert_has(fastest_stops(sample_state()), "Top 5 fastest waits")
@@ -815,8 +1008,14 @@ assert_state(refresh_if_stale(sample_state()), sample_state())
 assert_has(route_status(sample_state()), BulletedList(["Academy Street"]))
 assert_has(route_status(sample_state()), "Live data loaded.")
 assert_text(route_status(State([], [], [], "", "", False, "No data.",
-                               TEST_TIME)).content[1:],
+                               TEST_TIME)).content[1:-1],
             "Route status\nNo data.\nRunning\nNone.\nNot running\nNone.")
+
+# site_page: every page ends with the footer
+assert_equal(site_page(sample_state(), [Text("Hi")]),
+             Page(sample_state(), [Text("Hi"),
+                                   FooterContent(SmallText(FOOTER_TEXT))]))
+assert_has(trip_planner(sample_state()), "By Brooks Evans 2026")
 
 # route: trip_planner remembers earlier choices
 assert_has(trip_planner(State(sample_stops(), [], [], "ISE Lab", "", False,
@@ -855,7 +1054,7 @@ assert_state(find_trip(sample_state(), "Mars", "ISE Lab", False),
 # ----------------------------------------------------------------- site
 
 set_site_information(
-    author="UD CISC 106 student",
+    author="Brooks Evans",
     description="Live UD bus wait times, route status, and a trip planner "
                 "that tells you whether to walk or take the bus.",
     sources=["https://udshuttle.etaspot.net (UD bus ETA SPOT data)",
@@ -864,22 +1063,38 @@ set_site_information(
     links=["https://github.com/brooksevans1025-droid/Cisc106finalProject"],
 )
 add_website_css(f"""
-body {{ font-family: system-ui, sans-serif; background: #f4f7fb;
-       color: #1a1a1a; max-width: 900px; margin: 0 auto; padding: 16px; }}
+body {{ font-family: system-ui, sans-serif; color: #1a1a1a;
+       background: linear-gradient(180deg, #e8eef7 0%, #f7f9fc 240px);
+       max-width: 900px; margin: 0 auto; padding: 16px; line-height: 1.5; }}
+.nav {{ display: flex; flex-wrap: wrap; gap: 6px; padding: 10px;
+       background: white; border-radius: 16px; margin-bottom: 12px;
+       box-shadow: 0 2px 10px rgba(0, 83, 159, 0.12); }}
 h1 {{ color: {UD_BLUE}; border-bottom: 4px solid {UD_GOLD};
-     padding-bottom: 8px; }}
-h2 {{ color: {UD_BLUE}; }}
+     padding-bottom: 8px; font-size: 2rem; }}
+h2, h3 {{ color: {UD_BLUE}; }}
 button {{ background: {UD_BLUE}; color: white; border: none;
-         border-radius: 999px; padding: 8px 16px; margin: 4px;
-         cursor: pointer; font-weight: 600; }}
-button:hover, button:focus {{ background: {UD_GOLD}; color: {UD_BLUE}; }}
+         border-radius: 999px; padding: 8px 16px; margin: 2px;
+         cursor: pointer; font-weight: 600;
+         transition: background 0.15s, transform 0.15s; }}
+button:hover {{ background: {UD_GOLD}; color: {UD_BLUE};
+               transform: translateY(-1px); }}
+button:focus-visible, select:focus-visible, input:focus-visible {{
+  outline: 3px solid {UD_GOLD}; outline-offset: 2px; }}
 table {{ width: 100%; border-collapse: collapse; background: white;
         border-radius: 12px; overflow: hidden;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }}
 th {{ background: {UD_BLUE}; color: white; text-align: left;
      padding: 10px; }}
 td {{ padding: 10px; border-bottom: 1px solid #e3e8ef; }}
+tr:hover td {{ background: #fff8d6; }}
+li {{ margin: 4px 0; }}
+label {{ font-weight: 600; }}
 select {{ padding: 8px; border-radius: 8px; border: 1px solid {UD_BLUE};
-         margin: 4px 0 12px; display: block; }}
+         margin: 4px 0 12px; display: block; width: 100%;
+         max-width: 420px; background: white; }}
+input[type="checkbox"] {{ accent-color: {UD_BLUE}; width: 18px;
+                          height: 18px; vertical-align: middle; }}
+footer {{ margin-top: 32px; padding-top: 12px; text-align: center;
+         color: #5b6675; border-top: 1px solid #d5dde8; }}
 """)
 start_server(load_bus_data(State([], [], [], "", "", False, "", 0.0)))
