@@ -1053,15 +1053,20 @@ assert_state(find_trip(sample_state(), "Mars", "ISE Lab", False),
 
 # ----------------------------------------------------------------- site
 
+set_website_title("UD Bus Tracker")
 set_site_information(
     author="Brooks Evans",
     description="Live UD bus wait times, route status, and a trip planner "
                 "that tells you whether to walk or take the bus.",
     sources=["https://udshuttle.etaspot.net (UD bus ETA SPOT data)",
-             "https://drafter-edu.github.io/drafter/"],
+             "https://drafter-edu.github.io/drafter/",
+             "https://routing.openstreetmap.de (walking and bus paths)",
+             "https://leafletjs.com and OpenStreetMap (trip map)"],
     planning=["README", "prompt_log.txt"],
     links=["https://github.com/brooksevans1025-droid/Cisc106finalProject"],
 )
+hide_debug_information()
+set_website_framed(False)
 add_website_css(f"""
 body {{ font-family: system-ui, sans-serif; color: #1a1a1a;
        background: linear-gradient(180deg, #e8eef7 0%, #f7f9fc 240px);

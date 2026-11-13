@@ -1058,3 +1058,49 @@ Done.
 - About page: the author in set_site_information is now "Brooks Evans".
 87 tests pass (1 new for the description); README test count updated.
 Not checked: the pages in a real browser.
+
+---------------------------------------------------------------------
+PROMPT 22
+---------------------------------------------------------------------
+ensure my code has this but with my info
+
+(Pasted example)
+set_website_title("Corgi Cafe")
+set_site_information(
+    author="Your Name",
+    description="Order snacks for very good dogs.",
+    sources="Thanks to the Drafter docs and my study group.",
+    planning=["plan.pdf", "design.pdf"],
+    links=["https://github.com/your-username/your-repository"]
+)
+hide_debug_information()
+set_website_framed(False)
+
+---------------------------------------------------------------------
+RESPONSE 22
+---------------------------------------------------------------------
+[While working]
+set_site_information is already there with your details. Three calls are
+missing: set_website_title, hide_debug_information and
+set_website_framed. I'll add them. I'll also credit the two other things
+the site uses, the OpenStreetMap router and the Leaflet map library, in
+sources.
+
+[Final reply]
+main.py now has all of it, with your info:
+- set_website_title("UD Bus Tracker")
+- set_site_information: author Brooks Evans, the site description, the
+  sources (UD's ETA SPOT bus data, the Drafter docs, and now also the
+  OpenStreetMap router and Leaflet map used for the trip map), planning
+  (README and prompt_log.txt), and your GitHub repo link.
+- hide_debug_information()
+- set_website_framed(False)
+
+87 tests pass. hide_debug_information() also hides the test results under
+the page; they still run and print in the terminal. README updated to say
+so.
+
+Not checked: the site in a real browser. planning lists README and
+prompt_log.txt by name; they live in the project root, not next to
+main.py, so if drafter turns them into links on the About page, those
+links may not open.

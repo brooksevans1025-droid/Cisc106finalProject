@@ -33,7 +33,9 @@ cd scripts
 python main.py
 ```
 Drafter opens the site at http://localhost:8000. The 87 unit tests run every
-time the file loads; their results are shown under the page.
+time the file loads. The debug panel is hidden (`hide_debug_information()`),
+so their results print in the terminal; remove that line in `main.py` to
+see them under the page again.
 
 Drafter writes errors to `scripts/drafter-debug.log` (git-ignored). With
 drafter 2.1.3 it always logs "Unhandled configuration update event" for the
