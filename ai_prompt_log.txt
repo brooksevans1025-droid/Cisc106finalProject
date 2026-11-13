@@ -1104,3 +1104,61 @@ Not checked: the site in a real browser. planning lists README and
 prompt_log.txt by name; they live in the project root, not next to
 main.py, so if drafter turns them into links on the About page, those
 links may not open.
+
+---------------------------------------------------------------------
+PROMPT 23
+---------------------------------------------------------------------
+why wont this work
+
+(Pasted GitHub Pages deploy instructions: Settings > Pages > Source:
+GitHub Actions; then in the Actions tab select the deploy workflow ("Deploy
+main branch as website"), click Run workflow, and watch for a green
+checkmark.)
+
+, I don t see the pop up in the actions tab, also the porompt log is now
+named ai_prompt_log
+
+---------------------------------------------------------------------
+RESPONSE 23
+---------------------------------------------------------------------
+[While working]
+That's the cause: your repo has no .github/workflows folder at all. The
+guide assumes the deploy workflow file came with a drafter starter repo.
+Without that file, the Actions tab has nothing to run and no "Run
+workflow" button.
+
+Drafter doesn't include a workflow file, so I'll write one. The build
+command is drafter main.py --compile, which writes the site to dist/. A
+test build worked, but walking_paths.json and bus_paths.json were not
+copied, so the published site would fall back to straight lines. The fix
+is drafter's add_website_file. Drafter only blocks a missing file when it
+knows the file is absent, and in the browser it can't tell, so it's safe
+there. Asset paths in the built page are relative, so the site works at a
+GitHub Pages sub-address.
+
+[Final reply]
+The "Run workflow" button was missing because the repo had no deploy
+workflow. The guide assumes a file that comes with drafter's starter
+repo; yours started from scratch, so there was nothing to run.
+
+Added:
+- .github/workflows/deploy.yml, named "Deploy main branch as website". It
+  installs drafter, builds the site with drafter main.py --compile, and
+  publishes it to GitHub Pages. It runs on every push to master, and its
+  workflow_dispatch trigger adds the Run workflow button.
+- add_website_file for walking_paths.json and bus_paths.json in main.py.
+  Without it, the published site would have had straight lines; a test
+  build now includes both files.
+- dist/ added to .gitignore (local build output).
+- The About page's planning list now names ai_prompt_log.txt.
+- README: a Deploying section. 87 tests pass.
+
+What to do:
+1. Commit and push, including the new .github folder. The button only
+   appears once the workflow file is on GitHub, on master.
+2. Settings > Pages > Source: GitHub Actions (one time).
+3. The push itself starts a deploy. Watch it in the Actions tab; Run
+   workflow is there for later re-runs.
+
+Not checked: the workflow on GitHub (I can't run it from here). If it
+shows a red X, paste the error.

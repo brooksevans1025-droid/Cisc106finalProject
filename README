@@ -12,6 +12,7 @@ whether to walk or take the bus.
 - [Pages](#pages)
 - [Data](#data)
 - [Map paths](#map-paths)
+- [Deploying](#deploying)
 
 ## Description
 The goal of this project is to determine whether it is better to walk to a
@@ -84,3 +85,14 @@ minute). Anything missing is drawn as a straight line.
 
 The trip map uses Leaflet 1.9.4 (from unpkg) and OpenStreetMap tiles,
 so it needs an internet connection.
+
+## Deploying
+`.github/workflows/deploy.yml` publishes the site to GitHub Pages. It
+installs drafter, builds the site with `drafter main.py --compile` (into
+`scripts/dist`, git-ignored) and uploads it. `main.py` registers
+`walking_paths.json` and `bus_paths.json` with `add_website_file`, so the
+published site gets them too.
+
+One-time setup: in the repository's Settings > Pages, set Source to
+GitHub Actions. After that, every push to `master` deploys, or run it by
+hand from the Actions tab (Deploy main branch as website > Run workflow).

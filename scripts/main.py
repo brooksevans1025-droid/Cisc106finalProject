@@ -1062,11 +1062,13 @@ set_site_information(
              "https://drafter-edu.github.io/drafter/",
              "https://routing.openstreetmap.de (walking and bus paths)",
              "https://leafletjs.com and OpenStreetMap (trip map)"],
-    planning=["README", "prompt_log.txt"],
+    planning=["README", "ai_prompt_log.txt"],
     links=["https://github.com/brooksevans1025-droid/Cisc106finalProject"],
 )
 hide_debug_information()
 set_website_framed(False)
+# so the published site gets the precomputed paths, not straight lines
+add_website_file(WALKING_PATHS_FILE, BUS_PATHS_FILE)
 add_website_css(f"""
 body {{ font-family: system-ui, sans-serif; color: #1a1a1a;
        background: linear-gradient(180deg, #e8eef7 0%, #f7f9fc 240px);
